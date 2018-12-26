@@ -3,7 +3,7 @@
 # @Author: Jingrou Wu
 # @Date:   2018-12-24 19:15:04
 # @Last Modified by:   Jingrou Wu
-# @Last Modified time: 2018-12-26 14:36:41
+# @Last Modified time: 2018-12-27 00:31:16
 
 import math
 import scipy.special as special
@@ -260,9 +260,9 @@ def overLappingTemplateMatching(M,sequence,B):
 
 def Universal(M,Q,sequence):
     n = len(sequence)
-    k = n // M - Q # blocks#
-    initial = sequence[:Q]
-    test = sequence[Q:]
+    K = n // M - Q # blocks#
+    initial = sequence[:Q*M]
+    test = sequence[Q*M:]
 
     values = list(permutations(initial,M))
     initial_blocks = {}
@@ -271,18 +271,118 @@ def Universal(M,Q,sequence):
         initial_blocks[value] = 0
     for i in range(Q):
         block_i = tuple(initial[i*M:i*M+M])
-        initial_blocks[block_i] += 1
-    for i in range(k):
+        print(block_i)
+        initial_blocks[block_i] = i+1
+    print(initial_blocks)
+    for i in range(K):
         block_t = tuple(test[i*M:i*M+M])
-        cumsum += math.log(i+Q+1-initial_blocks[block_t],2)
-    print(cumsum)
-    f = cumsum/k
-    #p = math.erfc(abs(f-???))
+        last = initial_blocks[block_t]
+        initial_blocks[block_t] = Q + 1 + i
+        cumsum += math.log(initial_blocks[block_t]-last,2)
+        print(initial_blocks[block_t],last,cumsum)
+    f = cumsum/K
+    print(f,U_TABLE.loc[M,'expectedValue'],U_TABLE.loc[M,'variance'])
+    p = math.erfc(abs((f-U_TABLE.loc[M,'expectedValue'])/(math.sqrt(2*U_TABLE.loc[M,'variance']))))
+    print p,p>0.01
 
-# Remain to finish
+# Some problem with func BM
+# Ref from https://github.com/dj-on-github/sp800_22_tests/blob/master/sp800_22_linear_complexity_test.py
+# Remain to fix
 def linearComplexity(M,sequence):
+    K = 6
     n = len(sequence)
+    L = M // 2
+    N = n // M
+    LC = []
+    for i in range(N):
+        seq = sequence[i*M:i*M+M]
+        LC.append(berelekamp_massey(seq)[0])
+        a = float(M)/2.0
+    b = ((((-1)**(M+1))+9.0))/36.0
+    c = ((M/3.0) + (2.0/9.0))/(2**M)
+    mu =  a+b-c
+    
+    T = list()
+    for i in range(N):
+        x = ((-1.0)**M) * (LC[i] - mu) + (2.0/9.0)
+        T.append(x)
+        
+    # Step 4 Count the distribution over Ticket
+    v = [0,0,0,0,0,0,0]
+    for t in T:
+        if t <= -2.5:
+            v[0] += 1
+        elif t <= -1.5:
+            v[1] += 1
+        elif t <= -0.5:
+            v[2] += 1
+        elif t <= 0.5:
+            v[3] += 1
+        elif t <= 1.5:
+            v[4] += 1
+        elif t <= 2.5:
+            v[5] += 1            
+        else:
+            v[6] += 1
+
+    # Step 5 Compute Chi Square Statistic
+    pi = [0.010417,0.03125,0.125,0.5,0.25,0.0625,0.020833]
+    chisq = 0.0
+    for i in range(K+1):
+        chisq += ((v[i] - (N*pi[i]))**2.0)/(N*pi[i])
+    print("  chisq = ",chisq)
+    # Step 6 Compute P Value
+    P = 1 - special.gammainc((K/2.0),(chisq/2.0))
+    print("  P = ",P)
+    success = (P >= 0.01)
+    return (success, P, None)
     pass
+
+def BM(sequence):
+    R = []
+    Rs = [R]
+    cnt = 0
+    fails = []
+    deltas = []
+    for i in range(len(sequence)):
+        print(Rs)
+        print(i,(str)(R),cnt)
+        print(deltas)
+        print(fails)
+        R_last = R[:]
+        m = len(R)
+        pred = sum(sequence[i-j-1]*R[j] for j in range(m))
+        print(pred,sequence[i])
+        delta = sequence[i] - pred
+        if pred != sequence[i]:
+            fail = i
+            if cnt == 0:
+                R = [0 for j in range(i+1)]
+            else:
+                R = []
+                print(cnt-1)
+                mul = delta*1.0/deltas[fails[cnt-1]]
+                print(i-fails[cnt-1]-1)
+                R1 = [0 for j in range(i-fails[cnt-1]-1)]
+                R1.append(1*mul)
+                for j in range(len(Rs[cnt-1])):
+                    R1.append(-Rs[cnt-1][j]*mul)
+                print(R1)
+                for j in range(max(len(R_last),len(R1))):
+                    if j < len(R_last) and j < len(R1):
+                        R.append(R1[j] + R_last[j])
+                    elif j< len(R_last):
+                        R.append(R_last[j])
+                    elif j<len(R1):
+                        R.append(R1[j])
+                print(R)
+                print("Delta = %f\tmul = %f"%(delta,mul))
+            cnt += 1
+            fails.append(fail)
+            Rs.append(R[:])
+        deltas.append(delta)
+    print(R)
+    return R,len(R)
 
 # Result wrong, need to be fixed
 def serial(m,sequence):
@@ -491,6 +591,32 @@ def find_next(s):
             next_a.append(k)
     return next_a
 
+def berelekamp_massey(bits):
+    n = len(bits)
+    b = [0 for x in bits]  #initialize b and c arrays
+    c = [0 for x in bits]
+    b[0] = 1
+    c[0] = 1
+    
+    L = 0
+    m = -1
+    N = 0
+    while (N < n):
+        #compute discrepancy
+        d = bits[N]
+        for i in range(1,L+1):
+            d = d ^ (c[i] & bits[N-i])
+        if (d != 0):  # If d is not zero, adjust poly
+            t = c[:]
+            for i in range(0,n-N+m):
+                c[N-m+i] = c[N-m+i] ^ b[i] 
+            if (L <= (N/2)):
+                L = N + 1 - L
+                m = N
+                b = t 
+        N = N +1
+    # Return length of generator and the polynomial
+    return L , c[0:L]
 
 
 LRO_v = {8: [1, 2, 3, 4], 128: [4, 5, 6, 7, 8, 9],
@@ -504,6 +630,9 @@ OLTM_pie = [0.324651,0.182617,0.142670,0.106645,0.077142,0.166269]
 col_name = 'pi_%d(x)'
 RE_PIE = {col_name%0:[0.5,0.75,0.8333,0.8750,0.9,0.9167,0.9286],col_name%1:[0.25,0.0625,0.0278,0.0156,0.0100,0.0069,0.0051],col_name%2:[0.125,0.0469,0.0231,0.0137,0.009,0.0064,0.0047],col_name%3:[0.0625,0.0352,0.0193,0.0120,0.0081,0.0058,0.0044],col_name%4:[0.0312,0.00264,0.0161,0.0105,0.0073,0.0053,0.0041],col_name%5:[0.0312,0.0791,0.0804,0.0733,0.0656,0.0588,0.0531]}
 RE_PIE = pd.DataFrame(RE_PIE,index = ['x = %d'%i for i in range(1,8)])
+U_TABLE = {'expectedValue':[0.7326495,1.5374383,2.4016068,3.3112247,4.2534266,5.21776051,6.1962507,7.1836656,8.1764248,9.1723243,10.170032,11.168765,12.168070,13.167693,14.167488,15.167379],'variance':[0.69,1.338,1.901,2.358,2.705,2.954,3.125,3.238,3.311,3.356,3.384,3.401,3.410,3.416,3.419,3.421]}
+U_TABLE = pd.DataFrame(U_TABLE,index = range(1,17))
+
 if __name__ == "__main__":
     dic = {}
     sequence = [1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
@@ -515,10 +644,11 @@ if __name__ == "__main__":
     seq = [1,0,1,1,1,0,1,1,1,1,0,0,1,0,1,1,0,1,0,0,0,1,1,1,0,0,1,0,1,1,1,0,1,1,1,1,1,0,0,0,0,1,0,1,1,0,1,1,0,1]
     seq = '10111011110010110110011100101110111110000101101001'
     seq = '01011010011101010111'
-    seq = '0110110101'
-    seq = '1011010111'
-    seq = '0100110101'
-    seq = '0011011101'
+    seq = '1101011110001'
+    # seq = '0110110101'
+    # seq = '1011010111'
+    # seq = '0100110101'
+    # seq = '0011011101'
     # seq = '1100100100001111110110101010001000100001011010001100001000110100110001001100011001100010100010111000'
     seq = list(seq)
     for i in range(len(seq)):
@@ -543,5 +673,8 @@ if __name__ == "__main__":
     # print(seq)
     # print(cumulativeSums(0,sequence))
     # print(approximateEntropy(2,sequence))
-    print(serial(3,sequence))
+    # print(serial(3,sequence))
+    print(Universal(2,4,sequence))
+    # print(berelekamp_massey(seq))
+    # print(linearComplexity(13,sequence))
 
