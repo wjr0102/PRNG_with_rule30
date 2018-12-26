@@ -3,13 +3,15 @@
 # @Author: Jingrou Wu
 # @Date:   2018-12-24 19:15:04
 # @Last Modified by:   Jingrou Wu
-# @Last Modified time: 2018-12-25 19:21:15
+# @Last Modified time: 2018-12-26 14:36:41
 
 import math
 import scipy.special as special
+from scipy.stats import norm
 import pandas as pd
 import numpy as np
 from itertools import permutations
+from itertools import product
 
 
 def frequency(sequence):
@@ -282,21 +284,171 @@ def linearComplexity(M,sequence):
     n = len(sequence)
     pass
 
-# Remain to finish
+# Result wrong, need to be fixed
 def serial(m,sequence):
-    pass
+    n = len(sequence)
+    dics = []
+    for i in range(3):
+        seq = extend_seq(m-i,sequence)
+        dic = get_frequency(m-i,seq)
+        dics.append(dic)
+    fi = []
+    for i in range(len(dics)):
+        fi_v = (math.pow(2,m-i)*1.0/n)*sum([(dics[i][key])**2 for key in dics[i].keys()]) - n
+        fi.append(fi_v)
+    p_values = []
+    delta1 = fi[0] - fi[1]
+    delta2 = fi[0] - 2*fi[1] + fi[2]
+    deltas = [delta1,delta2]
+    print(deltas)
+    print(fi)
+    for i in range(len(fi)-1):
+        delta = deltas[i]
+        print(math.pow(2,m-2-i),delta*1.0/2)
+        p = 1- special.gammainc(math.pow(2,m-2-i),delta*1.0)
+        p_values.append(p)
+    return p_values
 
 def approximateEntropy(m,sequence):
-    pass
+    n = len(sequence)
+    fi1 = get_fi(m,sequence)
+    fi2 = get_fi(m+1,sequence)
+    print(fi1-fi2)
+    print(math.log(2)-(fi1-fi2))
+    obs = 2*n*(math.log(2)-(fi1-fi2))
+    print(obs)
+    p = 1 - special.gammainc(math.pow(2,m-1),obs/2)
+    return p,p>=0.01
 
+def extend_seq(m,sequence):
+    seq = sequence[:]
+    seq.extend(seq[:m-1])
+    return seq
+
+def get_frequency(m,sequence):
+    n = len(sequence)
+    values = list(product([0,1],repeat = m))
+    dic = {}
+    fi = 0
+    for value in values:
+        dic[value] = 0
+    for i in range(n-m+1):
+        block = tuple(sequence[i:i+m])
+        dic[block] += 1
+    return dic
+# Error in the guidance?
+# When repeat: φ(4) =0+0+0+0.1(log0.01)+0.1(log0.01)+0.2(log0.02)+0.1(log0.01)+0+0+ 0.1(log 0.01) + 0.3(log 0.03) + 0 + 0 + 0.1(log 0.01) + 0 + 0) = -1.83437197.
+# 0.0x should be 0.x
+def get_fi(m,sequence):
+    seq = extend_seq(m,sequence)
+    dic = get_frequency(m,sequence)
+    for key in dic.keys():
+        c = dic[key]*1.0/(n-m+1)
+        if c != 0:
+            fi += c*math.log(c)
+    return fi
+
+
+# k's range issue
 def cumulativeSums(mode,sequence):
-    pass
+    n = len(sequence)
+    seq = normalize(sequence)
+    if mode == 0:
+        p_sum = [sum(seq[:i+1]) for i in range(n)]
+    elif mode == 1:
+        p_sum = [sum(seq[i:]) for i in range(n-1,-1,-1)]
+    else:
+        print('Mode error: mode should only be equal to 0 or 1!')
+        return
+    z = max(p_sum)
+    print(z)
+    p1 = 0
+    p2 = 0
+    for k in range((int)((-n*1.0/z +1)/4),(int)(((n*1.0/z - 1)/4))+1):
+        p1 += norm.cdf((4*k+1)*z/math.sqrt(n)) - norm.cdf((4*k-1)*z/math.sqrt(n))
+    for k in range((int)((-n*1.0/z -3)/4),(int)(((n*1.0/z -1)/4))+1):
+        p2 += norm.cdf((4*k+3)*z/math.sqrt(n)) - norm.cdf((4*k+1)*z/math.sqrt(n))
+    p = 1 - p1 + p2
 
-def randomExcursions(sequence):
-    pass
+    return p,p>=0.01
+
+def randomExcursions(sequence,k=5):
+    seq = normalize(sequence)
+    n = len(seq)
+    p_sum = [sum(seq[:i+1]) for i in range(n)]
+    p_sum.append(0)
+    p_sum.insert(0,0)
+    index = 0
+    values = range(-4,5)
+    values.remove(0)
+    cycles = []
+    while index != -1:
+        dic = {}
+        for value in values:
+            dic[value] = 0
+        if 0 not in p_sum[index+1:]:
+            break
+        index2 = p_sum[index+1:].index(0) + index + 1
+        cycle = p_sum[index+1:index2]
+        for x in cycle:
+            if x in values:
+                dic[x] += 1
+        cycles.append(dic)
+        index = index2
+    j = len(cycles)
+    dic = {}
+    for i in range(len(cycles)):
+        dic[i] = []
+    table = pd.DataFrame(np.zeros((len(values),k+1)),index = values)
+    for x in values:
+        for cycle in cycles:
+            if cycle[x]>k:
+                cycle[x] = k
+            table.loc[x,cycle[x]] += 1
+    table['test statistic'] = 0
+    table['p-value'] = 0
+    for x in values:
+        obs = 0
+        for i in range(k+1):
+            obs += (table.loc[x,i] - j*RE_PIE.loc['x = %d'%(abs(x)),'pi_%d(x)'%i])**2/(j*RE_PIE.loc['x = %d'%(abs(x)),'pi_%d(x)'%i])
+        table.loc[x,'test statistic'] = obs
+        p = 1 - special.gammainc(k/2,obs/2)
+        table.loc[x,'p-value'] = p
+    return table,table[table['p-value']<0.01]
+    
 
 def randomExcursionsVariant(sequence):
-    pass
+    seq = normalize(sequence)
+    n = len(seq)
+    p_sum = [sum(seq[:i+1]) for i in range(n)]
+    p_sum.append(0)
+    p_sum.insert(0,0)
+    dic = {}
+    values = range(-9,10)
+    values.remove(0)
+    j = -1
+    for value in values:
+        dic[value] = 0
+    for ele in p_sum:
+        if dic.has_key(ele):
+            dic[ele] += 1
+        if ele == 0:
+            j += 1
+    p_values = {}
+    for x in values:
+        p = math.erfc(abs(dic[x]-j)/math.sqrt(2*j*(4*abs(x)-2)))
+        p_values[x] = p
+    fail = 0
+    for p in p_values.values():
+        if p < 0.01:
+            fail+=1
+    return p_values,fail*1.0/len(values)
+
+def normalize(sequence):
+    seq = sequence[:]
+    for i in range(len(seq)):
+        seq[i] = 2*seq[i]-1
+    return seq
 
 
 
@@ -340,6 +492,7 @@ def find_next(s):
     return next_a
 
 
+
 LRO_v = {8: [1, 2, 3, 4], 128: [4, 5, 6, 7, 8, 9],
          10000: [10, 11, 12, 13, 14, 15, 16]}
 LRO_pie = {8: [0.2148, 0.3672, 0.2305, 0.1875], 128: [0.1174, 0.2430, 0.2493, 0.1752,
@@ -348,6 +501,9 @@ LRO_k = {8: 3, 128: 5, 10000: 6}
 LRO_N = {8: 16, 128: 49, 10000: 75}
 OLTM_pie = [0.324651,0.182617,0.142670,0.106645,0.077142,0.166269]
 
+col_name = 'pi_%d(x)'
+RE_PIE = {col_name%0:[0.5,0.75,0.8333,0.8750,0.9,0.9167,0.9286],col_name%1:[0.25,0.0625,0.0278,0.0156,0.0100,0.0069,0.0051],col_name%2:[0.125,0.0469,0.0231,0.0137,0.009,0.0064,0.0047],col_name%3:[0.0625,0.0352,0.0193,0.0120,0.0081,0.0058,0.0044],col_name%4:[0.0312,0.00264,0.0161,0.0105,0.0073,0.0053,0.0041],col_name%5:[0.0312,0.0791,0.0804,0.0733,0.0656,0.0588,0.0531]}
+RE_PIE = pd.DataFrame(RE_PIE,index = ['x = %d'%i for i in range(1,8)])
 if __name__ == "__main__":
     dic = {}
     sequence = [1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1,
@@ -359,6 +515,10 @@ if __name__ == "__main__":
     seq = [1,0,1,1,1,0,1,1,1,1,0,0,1,0,1,1,0,1,0,0,0,1,1,1,0,0,1,0,1,1,1,0,1,1,1,1,1,0,0,0,0,1,0,1,1,0,1,1,0,1]
     seq = '10111011110010110110011100101110111110000101101001'
     seq = '01011010011101010111'
+    seq = '0110110101'
+    seq = '1011010111'
+    seq = '0100110101'
+    seq = '0011011101'
     # seq = '1100100100001111110110101010001000100001011010001100001000110100110001001100011001100010100010111000'
     seq = list(seq)
     for i in range(len(seq)):
@@ -376,7 +536,12 @@ if __name__ == "__main__":
     # print(ranking(sequence, 3, 3))
     # print(nonOverLappingTemplateMatching(10, sequence, [0, 0, 1]))
     # print(discreteFourierTransform(sequence))
-    print(overLappingTemplateMatching(10,sequence,[1,1]))
-
-
+    # print(overLappingTemplateMatching(10,sequence,[1,1]))
+    # print(randomExcursionsVariant(sequence))
+    # print(randomExcursions(sequence))
+    # print(RE_PIE)
+    # print(seq)
+    # print(cumulativeSums(0,sequence))
+    # print(approximateEntropy(2,sequence))
+    print(serial(3,sequence))
 
